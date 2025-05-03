@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Juego de Combate - Punch Out Style</title>
+  <style>
+    canvas {
+      background: #111;
+      display: block;
+      margin: 0 auto;
+      border: 2px solid #fff;
+    }
+    #upgradeMenu {
+      text-align: center;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: none;
+    }
+    .btn {
+      background: #333;
+      color: white;
+      padding: 10px 20px;
+      margin: 10px;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<div id="upgradeMenu">
+  <h2>Mejoras</h2>
+  <p id="coinsDisplay"></p>
+  <button class="btn" onclick="buyUpgrade('damage')">+Daño (Costo: 20)</button>
+  <button class="btn" onclick="buyUpgrade('maxHp')">+Vida Máxima (Costo: 20)</button>
+  <button class="btn" onclick="buyUpgrade('speed')">+Velocidad (Costo: 20)</button>
+  <br>
+  <button class="btn" onclick="startNextFight()">Continuar</button>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let keys = {};
+let gameOver = false;
+let inGame = false;
+let inUpgradeMenu = false;
+
+const player = {
+  x: 200, y: 300, radius: 30, color: "lime",
+  speed: 4, damage: 10, maxHp: 100, hp: 100,
+  stamina: 100, maxStamina: 100, attackCooldown: 0,
+  isAttacking: false, dashCooldown: 0, dashDuration: 0,
+  isDashing: false, dashSpeed: 8, coins: 0,
+  level: 1, lastDir: { x: 1, y: 0 }, hitTimer: 0
+};
+
+const enemy = {
+  x: 600, y: 300, radius: 25, color: "red",
+  speed: 2, damage: 8, maxHp: 80, hp: 80,
+  stamina: 100, maxStamina: 100, attackCooldown: 0,
+  isDashing: false, dashCooldown: 0, dashDuration: 0,
+  dashX: 0, dashY: 0, hitTimer: 0
+};
+
+function spawnEnemy() {
+  const isBoss = player.level % 10 === 0;
+  enemy.x = 600;
+  enemy.y = 300;
+  enemy.hp = isBoss ? 200 + player.level * 20 : 80 + player.level * 10;
+  enemy.maxHp = enemy.hp;
+  enemy.stamina = 100;
+  enemy.dashCooldown = 0;
+  enemy.attackCooldown = 0;
+  enemy.isDashing = false;
+  enemy.speed = isBoss ? 3 : 2;
+  enemy.damage = isBoss ? 20 : 8 + player.level;
+  enemy.radius = isBoss ? 40 : 25;
+}
+
+function drawBar(x, y, w, h, value, max, color) {
+  ctx.fillStyle = "gray";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, (value / max) * w, h);
+  ctx.strokeStyle = "white";
+  ctx.strokeRect(x, y, w, h);
+}
+
+function drawText(text, x, y, size = 20) {
+  ctx.fillStyle = "white";
+  ctx.font = `${size}px Arial`;
+  ctx.textAlign = "center";
+  ctx.fillText(text, x, y);
+}
+
+function handleVictory() {
+  inGame = false;
+  inUpgradeMenu = true;
+  player.coins += 10;
+  player.level++;
+  showUpgradeMenu();
+}
+
+function showUpgradeMenu() {
+  document.getElementById("upgradeMenu").style.display = "block";
+  document.getElementById("coinsDisplay").textContent = `Monedas: ${player.coins}`;
+}
+
+function buyUpgrade(type) {
+  if (player.coins < 20) return;
+  player.coins -= 20;
+  switch (type) {
+    case 'damage': player.damage += 5; break;
+    case 'maxHp': player.maxHp += 20; player.hp = player.maxHp; break;
+    case 'speed': player.speed += 0.5; break;
+  }
+  document.getElementById("coinsDisplay").textContent = `Monedas: ${player.coins}`;
+}
+
+function startNextFight() {
+  inUpgradeMenu = false;
+  document.getElementById("upgradeMenu").style.display = "none";
+  player.hp = player.maxHp;
+  player.stamina = player.maxStamina;
+  spawnEnemy();
+  inGame = true;
+  update();
+}
+
+function update() {
+  if (!inGame || inUpgradeMenu) return;
+
+  // Stamina
+  if (player.stamina < player.maxStamina) player.stamina += 0.5;
+  if (enemy.stamina < enemy.maxStamina) enemy.stamina += 0.5;
+
+  // Movimiento jugador
+  if (keys["a"] && player.x - player.radius > 0) { player.x -= player.speed; player.lastDir = { x: -1, y: 0 }; }
+  if (keys["d"] && player.x + player.radius < canvas.width) { player.x += player.speed; player.lastDir = { x: 1, y: 0 }; }
+  if (keys["w"] && player.y - player.radius > 0) { player.y -= player.speed; player.lastDir = { x: 0, y: -1 }; }
+  if (keys["s"] && player.y + player.radius < canvas.height) { player.y += player.speed; player.lastDir = { x: 0, y: 1 }; }
+
+  // Ataque
+  if (keys["j"] && player.attackCooldown <= 0 && player.stamina >= 10) {
+    player.isAttacking = true;
+    player.attackCooldown = 30;
+    player.stamina -= 10;
+
+    const dx = enemy.x - player.x;
+    const dy = enemy.y - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < player.radius + enemy.radius + 10) {
+      enemy.hp -= player.damage;
+      enemy.hitTimer = 10;
+    }
+  }
+
+  if (player.attackCooldown > 0) player.attackCooldown--;
+  else player.isAttacking = false;
+
+  // Dash jugador
+  if (keys["h"] && player.dashCooldown <= 0 && player.stamina >= 20) {
+    player.isDashing = true;
+    player.dashDuration = 10;
+    player.stamina -= 20;
+    player.dashCooldown = 60;
+  }
+
+  if (player.isDashing && player.dashDuration > 0) {
+    player.x += player.lastDir.x * player.dashSpeed;
+    player.y += player.lastDir.y * player.dashSpeed;
+    player.dashDuration--;
+  } else {
+    player.isDashing = false;
+  }
+  if (player.dashCooldown > 0) player.dashCooldown--;
+
+  // Enemigo
+  const dx = player.x - enemy.x;
+  const dy = player.y - enemy.y;
+  const dist = Math.hypot(dx, dy);
+  const dirX = dx / dist;
+  const dirY = dy / dist;
+
+  if (enemy.attackCooldown <= 0 && dist < player.radius + enemy.radius + 5 && enemy.stamina >= 10) {
+    player.hp -= enemy.damage;
+    player.hitTimer = 10;
+    enemy.attackCooldown = 40;
+    enemy.stamina -= 10;
+  }
+  if (enemy.attackCooldown > 0) enemy.attackCooldown--;
+
+  // Dash enemigo para esquivar
+  if (player.isAttacking && enemy.dashCooldown <= 0 && enemy.stamina >= 20) {
+    enemy.isDashing = true;
+    enemy.dashDuration = 10;
+    enemy.dashX = -dirX * 10;
+    enemy.dashY = -dirY * 10;
+    enemy.stamina -= 20;
+    enemy.dashCooldown = 60;
+  }
+
+  if (enemy.isDashing && enemy.dashDuration > 0) {
+    enemy.x += enemy.dashX;
+    enemy.y += enemy.dashY;
+    enemy.dashDuration--;
+  } else {
+    enemy.isDashing = false;
+  }
+  if (enemy.dashCooldown > 0) enemy.dashCooldown--;
+
+  if (!enemy.isDashing && dist > 50) {
+    enemy.x += dirX * enemy.speed;
+    enemy.y += dirY * enemy.speed;
+  }
+
+  // Fin del juego
+  if (player.hp <= 0) {
+    gameOver = true;
+    inGame = false;
+    drawText("¡Has perdido! Presiona R para reiniciar.", canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  if (enemy.hp <= 0) {
+    handleVictory();
+    return;
+  }
+
+  draw();
+  requestAnimationFrame(update);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Jugador
+  ctx.fillStyle = player.hitTimer > 0 ? "yellow" : player.color;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fill();
+  if (player.hitTimer > 0) player.hitTimer--;
+
+  // Enemigo
+  ctx.fillStyle = enemy.hitTimer > 0 ? "orange" : enemy.color;
+  ctx.beginPath();
+  ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
+  ctx.fill();
+  if (enemy.hitTimer > 0) enemy.hitTimer--;
+
+  // Barras
+  drawBar(20, 20, 200, 20, player.hp, player.maxHp, "green");
+  drawBar(20, 50, 200, 20, player.stamina, player.maxStamina, "cyan");
+  drawText("Jugador", 120, 15, 16);
+
+  drawBar(canvas.width - 220, 20, 200, 20, enemy.hp, enemy.maxHp, "red");
+  drawBar(canvas.width - 220, 50, 200, 20, enemy.stamina, enemy.maxStamina, "magenta");
+  drawText("Enemigo", canvas.width - 120, 15, 16);
+
+  drawText(`Nivel: ${player.level}`, canvas.width / 2, 30, 18);
+  drawText(`Monedas: ${player.coins}`, canvas.width / 2, 60, 18);
+}
+
+window.addEventListener("keydown", (e) => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === "r" && gameOver) {
+    gameOver = false;
+    player.hp = player.maxHp;
+    player.stamina = player.maxStamina;
+    spawnEnemy();
+    inGame = true;
+    update();
+  }
+  if (e.key === "Enter" && !inGame && !inUpgradeMenu) {
+    inGame = true;
+    spawnEnemy();
+    update();
+  }
+});
+window.addEventListener("keyup", (e) => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+function drawMenu() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawText("¡Punch Out Clone!", canvas.width / 2, 200, 32);
+  drawText("Presiona ENTER para jugar", canvas.width / 2, 300, 24);
+}
+
+drawMenu();
+</script>
+</body>
+</html>
